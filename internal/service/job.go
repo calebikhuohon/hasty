@@ -64,7 +64,7 @@ func (j JobService) RunJob(ctx context.Context, job core.Job) (uuid.UUID, error)
 	jobChan <- job
 
 	//re-run failing jobs
-	j.RerunFailingJobs(ctx, job, timeout)
+	go j.RerunFailingJobs(ctx, job, timeout)
 
 	return job.JobID, nil
 }
@@ -80,6 +80,7 @@ func (j JobService) GetJobDetails(ctx context.Context, jobId string) (core.Job, 
 
 func (j JobService) RerunFailingJobs(ctx context.Context, job core.Job, timeout time.Time)  {
 	jt := cron.NewJobTicker()
+	count := 0
 
 	for {
 		<-jt.T.C
@@ -89,7 +90,7 @@ func (j JobService) RerunFailingJobs(ctx context.Context, job core.Job, timeout 
 		}
 		for _, jb := range jobs {
 			log.Println("running a failed job")
-			if jb.Status != core.JobCompleted {
+			if jb.Status != core.JobCompleted && count < j.MaxRetries {
 				err := j.rdb.Set(ctx, job.ObjectID, job.JobID, timeout.Sub(time.Now())).Err()
 				if err != nil {
 					return
@@ -99,6 +100,7 @@ func (j JobService) RerunFailingJobs(ctx context.Context, job core.Job, timeout 
 
 				go worker(ctx, jobChan, j.storage, j.rdb)
 				jobChan <- job
+				count += 1
 			}
 		}
 		jt.UpdateJobTicker()
